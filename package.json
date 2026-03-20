@@ -1,0 +1,18 @@
+{
+  "name": "booking-engine",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install",
+    "setup": "cd server && npx prisma migrate dev --name init && npx prisma db seed",
+    "reset": "cd server && npx prisma migrate reset --force",
+    "test": "cd server && npm test",
+    "test:e2e": "cd client && npx playwright test"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

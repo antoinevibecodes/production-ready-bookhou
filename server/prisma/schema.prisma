@@ -1,0 +1,319 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// For production: change provider to "mysql" and url to env("DATABASE_URL")
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  name      String
+  role      String   @default("EMPLOYEE") // ADMIN or EMPLOYEE
+  createdAt DateTime @default(now())
+
+  bookings Booking[]
+  googleToken GoogleCalendarToken?
+}
+
+model GoogleCalendarToken {
+  id           Int      @id @default(autoincrement())
+  userId       Int      @unique
+  accessToken  String
+  refreshToken String
+  expiresAt    String   // ISO datetime
+  calendarId   String   @default("primary")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Venue {
+  id            Int    @id @default(autoincrement())
+  name          String
+  description   String @default("")
+  address       String
+  timezone      String // e.g. "America/New_York", "America/Chicago"
+  capacity      Int    @default(20)
+  firstSlot     String @default("12:00 PM")
+  lastSlot      String @default("06:00 PM")
+  durationMins  Int    @default(90)   // duration in minutes
+  bufferMins    Int    @default(30)   // buffer time in minutes
+  position      Int    @default(0)
+  color         String @default("#ef4444") // color for calendar display
+  days          String @default("")  // comma-separated available days
+  timeSlots     String @default("[]") // JSON array of time slot configs
+  images        String @default("[]") // JSON array of image filenames
+
+  bookings Booking[]
+  waivers  Waiver[]
+}
+
+model Package {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String
+  contents    String   // JSON string of what's included
+  price       Int      // cents
+  cost        Int      @default(0)   // internal cost in cents
+  extraPerson Int      @default(0)   // extra person price in cents
+  guestIncluded Int    @default(8)   // total guests included
+  type        String   // BIRTHDAY or FIELD_TRIP
+  status      String   @default("active") // active or disabled
+  position    Int      @default(0)
+  eventType   String   @default("onsite") // onsite or mobile
+  days        String   @default("")  // comma-separated days e.g. "Saturday,Sunday"
+  rooms       String   @default("[]") // JSON array of room/venue IDs
+  priceTiers  String   @default("[]") // JSON array of pricing tier objects
+  images      String   @default("[]") // JSON array of image filenames
+
+  bookings Booking[]
+}
+
+model Booking {
+  id              Int      @id @default(autoincrement())
+  type            String   // BIRTHDAY or FIELD_TRIP
+  status          String   @default("REQUESTED") // REQUESTED, CONFIRMED, CANCELLED, COMPLETED, DELETED
+  hostName        String
+  hostEmail       String
+  hostPhone       String
+  childName       String?
+  childAge        Int?
+  guestCount      Int      @default(10)
+  extraPersons    Int      @default(0)
+  extraPersonPrice Int     @default(0) // cents per extra person
+  date            String   // ISO date string stored in UTC
+  startTime       String   // HH:mm in UTC
+  endTime         String   // HH:mm in UTC
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  venueId   Int
+  venue     Venue   @relation(fields: [venueId], references: [id])
+  packageId Int
+  package   Package @relation(fields: [packageId], references: [id])
+  userId    Int?
+  createdBy User?   @relation(fields: [userId], references: [id])
+
+  transactions Transaction[]
+  refunds      Refund[]
+  invoices     Invoice[]
+  invitations  Invitation[]
+  waivers      Waiver[]
+  addOns       AddOn[]
+  emailLogs    EmailLog[]
+}
+
+model AddOn {
+  id        Int    @id @default(autoincrement())
+  name      String
+  price     Int    // cents - BUG #12: no custom amount/description fields
+  quantity  Int    @default(1)
+  bookingId Int
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+}
+
+model AddOnCatalog {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String   @default("")
+  price       Int      @default(0)   // cents
+  cost        Int      @default(0)   // internal cost in cents
+  image       String?  // filename of uploaded image
+  days        String   @default("")  // comma-separated days e.g. "Mon,Tue,Wed"
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+}
+
+model Transaction {
+  id             Int      @id @default(autoincrement())
+  bookingId      Int
+  amount         Int      // cents (positive for payments, positive for refunds too - type distinguishes)
+  type           String   @default("PAYMENT") // PAYMENT or REFUND
+  paymentMethod  String   // cash, card, apple_pay, cash_app
+  cardLast4      String?  // BUG #15: not stored after mock payment
+  cardholderName String?  // BUG #15: not stored after mock payment
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  booking Booking  @relation(fields: [bookingId], references: [id])
+  refund  Refund?
+}
+
+model Refund {
+  id              Int      @id @default(autoincrement())
+  bookingId       Int
+  transactionId   Int      @unique
+  amount          Int      // cents
+  reason          String?
+  cancellationFee Int      @default(0) // cents
+  createdAt       DateTime @default(now())
+
+  booking     Booking     @relation(fields: [bookingId], references: [id])
+  transaction Transaction @relation(fields: [transactionId], references: [id])
+}
+
+model Invoice {
+  id          Int      @id @default(autoincrement())
+  bookingId   Int
+  totalAmount Int      // cents
+  taxAmount   Int      // cents - BUG #21: stored as fixed $6 (600) instead of 6%
+  pdfPath     String?
+  createdAt   DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+}
+
+model Invitation {
+  id           Int      @id @default(autoincrement())
+  bookingId    Int
+  guestName    String
+  guestEmail   String?
+  guestPhone   String?
+  method       String   @default("email") // BUG #14: defaults to email instead of sms
+  message      String?  // BUG #22: generic text instead of personalized
+  rsvpStatus   String   @default("PENDING") // PENDING, YES, NO
+  waiverSigned Boolean  @default(false) // BUG #23: not updated when RSVP=YES
+  token        String   @unique
+  createdAt    DateTime @default(now())
+
+  booking Booking  @relation(fields: [bookingId], references: [id])
+  waivers Waiver[]
+}
+
+model Waiver {
+  id             Int      @id @default(autoincrement())
+  bookingId      Int?     // nullable for walk-in waivers
+  invitationId   Int?
+  customerId     Int?     // link to customer profile
+  type           String   @default("booking") // "booking" or "walkin"
+  guestName      String
+  guardianName   String?
+  signature      String?  // base64 or text
+  data           String?  // JSON string of waiver form data
+  email          String?  // top-level for querying/marketing
+  phone          String?  // top-level for querying/marketing
+  token          String   @unique
+  venueId        Int?     // for walk-in waivers (not tied to booking)
+  status         String   @default("signed") // signed, verified
+  verifiedAt     DateTime?
+  verifiedBy     Int?     // userId of staff who verified
+  marketingOptIn Boolean  @default(false)
+  signedAt       DateTime?
+  expiresAt      DateTime? // waiver expiration date (e.g. 1 year from signing)
+  ipAddress      String?  // IP address logged at signing
+  createdAt      DateTime @default(now())
+
+  booking    Booking?    @relation(fields: [bookingId], references: [id])
+  invitation Invitation? @relation(fields: [invitationId], references: [id])
+  venue      Venue?      @relation(fields: [venueId], references: [id])
+  customer   Customer?   @relation(fields: [customerId], references: [id])
+}
+
+model EmailLog {
+  id        Int      @id @default(autoincrement())
+  bookingId Int?
+  to        String
+  subject   String
+  body      String
+  sentAt    DateTime @default(now())
+
+  booking Booking? @relation(fields: [bookingId], references: [id])
+}
+
+model Discount {
+  id          Int      @id @default(autoincrement())
+  couponName  String
+  code        String   @unique
+  discount    Int      // value (percentage or flat cents depending on discountType)
+  discountType String  @default("percent") // percent or flat
+  limit       Int      @default(0) // 0 = no limit
+  used        Int      @default(0)
+  startDate   String?  // ISO date
+  endDate     String?  // ISO date
+  eventType   String   @default("onsite") // onsite, mobile, both
+  type        String   @default("storewide") // storewide, specific
+  location    String   @default("") // comma-separated venue IDs or empty = all
+  paidInFull  Boolean  @default(false) // must be paid in full to use
+  description String   @default("")
+  status      String   @default("active") // active, expired, disabled
+  createdAt   DateTime @default(now())
+}
+
+model BlockedTime {
+  id        Int      @id @default(autoincrement())
+  date      String   // ISO date e.g. "2026-03-16"
+  startTime String   // e.g. "09:00 AM"
+  endTime   String   // e.g. "10:00 AM"
+  room      String   // room name
+  reason    String   @default("")
+  createdAt DateTime @default(now())
+}
+
+model Category {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String   @default("")
+  status      String   @default("active") // active or disabled
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model EmailAutomation {
+  id          Int      @id @default(autoincrement())
+  subject     String
+  trigger     String   // e.g. "RSVP_CONFIRMATION", "EVENT_CREATE", etc.
+  triggerLabel String  @default("") // display name e.g. "RSVP Confirmation"
+  body        String   @default("") // email body template
+  enabled     Boolean  @default(true)
+  isDefault   Boolean  @default(true) // true = default, false = custom
+  sendTo      String   @default("host") // host, guest, team_member, custom
+  action      String   @default("after") // after, before
+  timeMins    Int      @default(0) // delay in minutes (0 = immediate)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Customer {
+  id               Int      @id @default(autoincrement())
+  firstName        String
+  lastName         String
+  phone            String   @unique
+  email            String?
+  address          String?
+  dob              String?  // YYYY-MM-DD or MM/DD/YYYY
+  emergencyContact String?
+  marketingOptIn   Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  children Child[]
+  waivers  Waiver[]
+}
+
+model Child {
+  id         Int      @id @default(autoincrement())
+  customerId Int
+  name       String
+  dob        String?
+
+  customer Customer @relation(fields: [customerId], references: [id])
+}
+
+model MarketingCampaign {
+  id             Int      @id @default(autoincrement())
+  name           String
+  type           String   // "email" or "sms"
+  subject        String?  // email subject
+  body           String   // message body
+  recipientCount Int      @default(0)
+  sentAt         DateTime?
+  createdAt      DateTime @default(now())
+}
